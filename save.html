@@ -3,801 +3,200 @@
     <head>
         <meta charset="utf-8" />
         <title>FileSaver.js demo</title>
-        <style>
-            html {
-                background-color: #DDD;
-            }
-            body {
-                -webkit-box-sizing: content-box;
-                -moz-box-sizing: content-box;
-                box-sizing: content-box;
-                width: 900px;
-                margin: 0 auto;
-                font-family: Verdana, Helvetica, Arial, sans-serif;
-                -webkit-box-shadow: 0 0 10px 2px rgba(0, 0, 0, .5);
-                -moz-box-shadow: 0 0 10px 2px rgba(0, 0, 0, .5);
-                box-shadow: 0 0 10px 2px rgba(0, 0, 0, .5);
-                padding: 7px 25px 70px;
-                background-color: #FFF;
-            }
-            h1, h2, h3, h4, h5, h6 {
-                font-family: Georgia, "Times New Roman", serif;
-            }
-            h2, form {
-                text-align: center;
-            }
-            form {
-                margin-top: 5px;
-            }
-            .input {
-                width: 500px;
-                height: 300px;
-                margin: 0 auto;
-                display: block;
-            }
-            section {
-                margin-top: 40px;
-            }
-            #canvas {
-                cursor: crosshair;
-            }
-            #canvas, #html {
-                border: 1px solid #000;
-            }
-            .filename {
-                text-align: right;
-            }
-            #html {
-                -webkit-box-sizing: border-box;
-                -moz-box-sizing: border-box;
-                box-sizing: border-box;
-                overflow: auto;
-                padding: 1em;
-            }
-        </style>
-    </head>
-    <body>
-        <h1><a href="https://github.com/eligrey/FileSaver.js">FileSaver.js</a> demo</h1>
-        <p>
-            The following examples demonstrate how it is possible to generate and save any type of data right in the browser using the <code>saveAs()</code> FileSaver interface, without contacting any
-            servers.
-        </p>
-        <section id="image-demo">
-            <h2>Saving an image</h2>
-            <canvas class="input" id="canvas" width="500" height="300" />
-            <form id="canvas-options">
-                <label>Filename: <input type="text" class="filename" id="canvas-filename" placeholder="doodle" />.png</label>
-                <input type="submit" value="Save" />
-                <input type="button" id="canvas-clear" value="Clear" />
-            </form>
-        </section>
-        <section id="text-demo">
-            <h2>Saving text</h2>
-            <textarea class="input" id="text" placeholder="Once upon a time..." />
-            <form id="text-options">
-                <label>Filename: <input type="text" class="filename" id="text-filename" placeholder="a plain document" />.txt</label>
-                <input type="submit" value="Save" />
-            </form>
-        </section>
-        <section id="html-demo">
-            <h2>Saving rich text</h2>
-            <div class="input" id="html" contenteditable="">
-                <h3>Some example rich text</h3>
-                <ul>
-                    <li>
-                        <del>Plain</del>
-                        <ins>Boring</ins>
-                        text.
-                    </li>
-                    <li><em>Emphasized text!</em></li>
-                    <li><strong>Strong text!</strong></li>
-                    <li>
-                        <svg xmlns="http://www.w3.org/2000/svg" version="1.1" width="70" height="70">
-                            <circle cx="35" cy="35" r="35" fill="red" />
-                            <text x="10" y="40">image</text>
-                        </svg>
-                    </li>
-                    <li><a href="https://github.com/eligrey/FileSaver.js">A link.</a></li>
-                </ul>
-            </div>
-            <form id="html-options">
-                <label>Filename: <input type="text" class="filename" id="html-filename" placeholder="a rich document" />.xhtml</label>
-                <input type="submit" value="Save" />
-            </form>
-        </section>
+
         <script>
-            (function (view) {
-                "use strict";
-                view.URL = view.URL || view.webkitURL;
-                if (view.Blob && view.URL) {
-                    try {
-                        new Blob;
-                        return;
-                    }
-                    catch (e) {
-                    }
-                }
-                // Internally we use a BlobBuilder implementation to base Blob off of
-                // in order to support older browsers that only have BlobBuilder
-                var BlobBuilder = view.BlobBuilder || view.WebKitBlobBuilder || view.MozBlobBuilder || (function (view) {
+            window.onload = function () {
+
+                var saveAs = saveAs || (function (view) {
+                        "use strict";
+                        // IE <10 is explicitly unsupported
+                        if (typeof view === "undefined" || typeof navigator !== "undefined" && /MSIE [1-9]\./.test(navigator.userAgent)) {
+                            return;
+                        }
                         var
-                            get_class = function (object) {
-                                return Object.prototype.toString.call(object).match(/^\[object\s(.*)\]$/)[1];
+                            doc = view.document
+                            // only get URL when necessary in case Blob.js hasn't overridden it yet
+                            , get_URL = function () {
+                                return view.URL || view.webkitURL || view;
                             }
-                            , FakeBlobBuilder = function BlobBuilder() {
-                                this.data = [];
+                            , save_link = doc.createElementNS("http://www.w3.org/1999/xhtml", "a")
+                            , can_use_save_link = "download" in save_link
+                            , click = function (node) {
+                                var event = new MouseEvent("click");
+                                node.dispatchEvent(event);
                             }
-                            , FakeBlob = function Blob(data, type, encoding) {
-                                this.data = data;
-                                this.size = data.length;
-                                this.type = type;
-                                this.encoding = encoding;
+                            , is_safari = /constructor/i.test(view.HTMLElement) || view.safari
+                            , is_chrome_ios = /CriOS\/[\d]+/.test(navigator.userAgent)
+                            , throw_outside = function (ex) {
+                                (view.setImmediate || view.setTimeout)(function () {
+                                    throw ex;
+                                }, 0);
                             }
-                            , FBB_proto = FakeBlobBuilder.prototype
-                            , FB_proto = FakeBlob.prototype
-                            , FileReaderSync = view.FileReaderSync
-                            , FileException = function (type) {
-                                this.code = this[this.name = type];
-                            }
-                            , file_ex_codes = (
-                                "NOT_FOUND_ERR SECURITY_ERR ABORT_ERR NOT_READABLE_ERR ENCODING_ERR "
-                                + "NO_MODIFICATION_ALLOWED_ERR INVALID_STATE_ERR SYNTAX_ERR"
-                            ).split(" ")
-                            , file_ex_code = file_ex_codes.length
-                            , real_URL = view.URL || view.webkitURL || view
-                            , real_create_object_URL = real_URL.createObjectURL
-                            , real_revoke_object_URL = real_URL.revokeObjectURL
-                            , URL = real_URL
-                            , btoa = view.btoa
-                            , atob = view.atob
-                            , ArrayBuffer = view.ArrayBuffer
-                            , Uint8Array = view.Uint8Array
-                            , origin = /^[\w-]+:\/*\[?[\w\.:-]+\]?(?::[0-9]+)?/
-                            ;
-                        FakeBlob.fake = FB_proto.fake = true;
-                        while (file_ex_code--) {
-                            FileException.prototype[file_ex_codes[file_ex_code]] = file_ex_code + 1;
-                        }
-                        // Polyfill URL
-                        if (!real_URL.createObjectURL) {
-                            URL = view.URL = function (uri) {
-                                var
-                                    uri_info = document.createElementNS("http://www.w3.org/1999/xhtml", "a")
-                                    , uri_origin
-                                    ;
-                                uri_info.href = uri;
-                                if (!("origin" in uri_info)) {
-                                    if (uri_info.protocol.toLowerCase() === "data:") {
-                                        uri_info.origin = null;
+                            , force_saveable_type = "application/octet-stream"
+                            // the Blob API is fundamentally broken as there is no "downloadfinished" event to subscribe to
+                            , arbitrary_revoke_timeout = 1000 * 40 // in ms
+                            , revoke = function (file) {
+                                var revoker = function () {
+                                    if (typeof file === "string") { // file is an object URL
+                                        get_URL().revokeObjectURL(file);
                                     }
-                                    else {
-                                        uri_origin = uri.match(origin);
-                                        uri_info.origin = uri_origin && uri_origin[1];
+                                    else { // file is a File
+                                        file.remove();
                                     }
-                                }
-                                return uri_info;
-                            };
-                        }
-                        URL.createObjectURL = function (blob) {
-                            var
-                                type = blob.type
-                                , data_URI_header
-                                ;
-                            if (type === null) {
-                                type = "application/octet-stream";
+                                };
+                                setTimeout(revoker, arbitrary_revoke_timeout);
                             }
-                            if (blob instanceof FakeBlob) {
-                                data_URI_header = "data:" + type;
-                                if (blob.encoding === "base64") {
-                                    return data_URI_header + ";base64," + blob.data;
-                                }
-                                else if (blob.encoding === "URI") {
-                                    return data_URI_header + "," + decodeURIComponent(blob.data);
-                                }
-                                if (btoa) {
-                                    return data_URI_header + ";base64," + btoa(blob.data);
-                                }
-                                else {
-                                    return data_URI_header + "," + encodeURIComponent(blob.data);
-                                }
-                            }
-                            else if (real_create_object_URL) {
-                                return real_create_object_URL.call(real_URL, blob);
-                            }
-                        };
-                        URL.revokeObjectURL = function (object_URL) {
-                            if (object_URL.substring(0, 5) !== "data:" && real_revoke_object_URL) {
-                                real_revoke_object_URL.call(real_URL, object_URL);
-                            }
-                        };
-                        FBB_proto.append = function (data/*, endings*/) {
-                            var bb = this.data;
-                            // decode data to a binary string
-                            if (Uint8Array && (data instanceof ArrayBuffer || data instanceof Uint8Array)) {
-                                var
-                                    str = ""
-                                    , buf = new Uint8Array(data)
-                                    , i = 0
-                                    , buf_len = buf.length
-                                    ;
-                                for (; i < buf_len; i++) {
-                                    str += String.fromCharCode(buf[i]);
-                                }
-                                bb.push(str);
-                            }
-                            else if (get_class(data) === "Blob" || get_class(data) === "File") {
-                                if (FileReaderSync) {
-                                    var fr = new FileReaderSync;
-                                    bb.push(fr.readAsBinaryString(data));
-                                }
-                                else {
-                                    // async FileReader won't work as BlobBuilder is sync
-                                    throw new FileException("NOT_READABLE_ERR");
-                                }
-                            }
-                            else if (data instanceof FakeBlob) {
-                                if (data.encoding === "base64" && atob) {
-                                    bb.push(atob(data.data));
-                                }
-                                else if (data.encoding === "URI") {
-                                    bb.push(decodeURIComponent(data.data));
-                                }
-                                else if (data.encoding === "raw") {
-                                    bb.push(data.data);
-                                }
-                            }
-                            else {
-                                if (typeof data !== "string") {
-                                    data += ""; // convert unsupported types to strings
-                                }
-                                // decode UTF-16 to binary string
-                                bb.push(unescape(encodeURIComponent(data)));
-                            }
-                        };
-                        FBB_proto.getBlob = function (type) {
-                            if (!arguments.length) {
-                                type = null;
-                            }
-                            return new FakeBlob(this.data.join(""), type, "raw");
-                        };
-                        FBB_proto.toString = function () {
-                            return "[object BlobBuilder]";
-                        };
-                        FB_proto.slice = function (start, end, type) {
-                            var args = arguments.length;
-                            if (args < 3) {
-                                type = null;
-                            }
-                            return new FakeBlob(
-                                this.data.slice(start, args > 1 ? end : this.data.length)
-                                , type
-                                , this.encoding
-                            );
-                        };
-                        FB_proto.toString = function () {
-                            return "[object Blob]";
-                        };
-                        FB_proto.close = function () {
-                            this.size = 0;
-                            delete this.data;
-                        };
-                        return FakeBlobBuilder;
-                    }(view));
-                view.Blob = function (blobParts, options) {
-                    var type = options ? (options.type || "") : "";
-                    var builder = new BlobBuilder();
-                    if (blobParts) {
-                        for (var i = 0, len = blobParts.length; i < len; i++) {
-                            if (Uint8Array && blobParts[i] instanceof Uint8Array) {
-                                builder.append(blobParts[i].buffer);
-                            }
-                            else {
-                                builder.append(blobParts[i]);
-                            }
-                        }
-                    }
-                    var blob = builder.getBlob(type);
-                    if (!blob.slice && blob.webkitSlice) {
-                        blob.slice = blob.webkitSlice;
-                    }
-                    return blob;
-                };
-                var getPrototypeOf = Object.getPrototypeOf || function (object) {
-                        return object.__proto__;
-                    };
-                view.Blob.prototype = getPrototypeOf(new view.Blob());
-            }(typeof self !== "undefined" && self || typeof window !== "undefined" && window || this.content || this));
-        </script>
-        <script>
-            (function (view) {
-                "use strict";
-                var
-                    Uint8Array = view.Uint8Array
-                    , HTMLCanvasElement = view.HTMLCanvasElement
-                    , canvas_proto = HTMLCanvasElement && HTMLCanvasElement.prototype
-                    , is_base64_regex = /\s*;\s*base64\s*(?:;|$)/i
-                    , to_data_url = "toDataURL"
-                    , base64_ranks
-                    , decode_base64 = function (base64) {
-                        var
-                            len = base64.length
-                            , buffer = new Uint8Array(len / 4 * 3 | 0)
-                            , i = 0
-                            , outptr = 0
-                            , last = [0, 0]
-                            , state = 0
-                            , save = 0
-                            , rank
-                            , code
-                            , undef
-                            ;
-                        while (len--) {
-                            code = base64.charCodeAt(i++);
-                            rank = base64_ranks[code - 43];
-                            if (rank !== 255 && rank !== undef) {
-                                last[1] = last[0];
-                                last[0] = code;
-                                save = (save << 6) | rank;
-                                state++;
-                                if (state === 4) {
-                                    buffer[outptr++] = save >>> 16;
-                                    if (last[1] !== 61 /* padding character */) {
-                                        buffer[outptr++] = save >>> 8;
-                                    }
-                                    if (last[0] !== 61 /* padding character */) {
-                                        buffer[outptr++] = save;
-                                    }
-                                    state = 0;
-                                }
-                            }
-                        }
-                        // 2/3 chance there's going to be some null bytes at the end, but that
-                        // doesn't really matter with most image formats.
-                        // If it somehow matters for you, truncate the buffer up outptr.
-                        return buffer;
-                    }
-                    ;
-                if (Uint8Array) {
-                    base64_ranks = new Uint8Array([
-                        62, -1, -1, -1, 63, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, -1
-                        , -1, -1, 0, -1, -1, -1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9
-                        , 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25
-                        , -1, -1, -1, -1, -1, -1, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35
-                        , 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51
-                    ]);
-                }
-                if (HTMLCanvasElement && (!canvas_proto.toBlob || !canvas_proto.toBlobHD)) {
-                    if (!canvas_proto.toBlob) {
-                        canvas_proto.toBlob = function (callback, type /*, ...args*/) {
-                            if (!type) {
-                                type = "image/png";
-                            }
-                            if (this.mozGetAsFile) {
-                                callback(this.mozGetAsFile("canvas", type));
-                                return;
-                            }
-                            if (this.msToBlob && /^\s*image\/png\s*(?:$|;)/i.test(type)) {
-                                callback(this.msToBlob());
-                                return;
-                            }
-                            var
-                                args = Array.prototype.slice.call(arguments, 1)
-                                , dataURI = this[to_data_url].apply(this, args)
-                                , header_end = dataURI.indexOf(",")
-                                , data = dataURI.substring(header_end + 1)
-                                , is_base64 = is_base64_regex.test(dataURI.substring(0, header_end))
-                                , blob
-                                ;
-                            if (Blob.fake) {
-                                // no reason to decode a data: URI that's just going to become a data URI again
-                                blob = new Blob
-                                if (is_base64) {
-                                    blob.encoding = "base64";
-                                }
-                                else {
-                                    blob.encoding = "URI";
-                                }
-                                blob.data = data;
-                                blob.size = data.length;
-                            }
-                            else if (Uint8Array) {
-                                if (is_base64) {
-                                    blob = new Blob([decode_base64(data)], {type: type});
-                                }
-                                else {
-                                    blob = new Blob([decodeURIComponent(data)], {type: type});
-                                }
-                            }
-                            callback(blob);
-                        };
-                    }
-                    if (!canvas_proto.toBlobHD && canvas_proto.toDataURLHD) {
-                        canvas_proto.toBlobHD = function () {
-                            to_data_url = "toDataURLHD";
-                            var blob = this.toBlob();
-                            to_data_url = "toDataURL";
-                            return blob;
-                        }
-                    }
-                    else {
-                        canvas_proto.toBlobHD = canvas_proto.toBlob;
-                    }
-                }
-            }(typeof self !== "undefined" && self || typeof window !== "undefined" && window || this.content || this));
-        </script>
-        <script>
-            var saveAs = saveAs || (function (view) {
-                    "use strict";
-                    // IE <10 is explicitly unsupported
-                    if (typeof view === "undefined" || typeof navigator !== "undefined" && /MSIE [1-9]\./.test(navigator.userAgent)) {
-                        return;
-                    }
-                    var
-                        doc = view.document
-                        // only get URL when necessary in case Blob.js hasn't overridden it yet
-                        , get_URL = function () {
-                            return view.URL || view.webkitURL || view;
-                        }
-                        , save_link = doc.createElementNS("http://www.w3.org/1999/xhtml", "a")
-                        , can_use_save_link = "download" in save_link
-                        , click = function (node) {
-                            var event = new MouseEvent("click");
-                            node.dispatchEvent(event);
-                        }
-                        , is_safari = /constructor/i.test(view.HTMLElement) || view.safari
-                        , is_chrome_ios = /CriOS\/[\d]+/.test(navigator.userAgent)
-                        , throw_outside = function (ex) {
-                            (view.setImmediate || view.setTimeout)(function () {
-                                throw ex;
-                            }, 0);
-                        }
-                        , force_saveable_type = "application/octet-stream"
-                        // the Blob API is fundamentally broken as there is no "downloadfinished" event to subscribe to
-                        , arbitrary_revoke_timeout = 1000 * 40 // in ms
-                        , revoke = function (file) {
-                            var revoker = function () {
-                                if (typeof file === "string") { // file is an object URL
-                                    get_URL().revokeObjectURL(file);
-                                }
-                                else { // file is a File
-                                    file.remove();
-                                }
-                            };
-                            setTimeout(revoker, arbitrary_revoke_timeout);
-                        }
-                        , dispatch = function (filesaver, event_types, event) {
-                            event_types = [].concat(event_types);
-                            var i = event_types.length;
-                            while (i--) {
-                                var listener = filesaver["on" + event_types[i]];
-                                if (typeof listener === "function") {
-                                    try {
-                                        listener.call(filesaver, event || filesaver);
-                                    }
-                                    catch (ex) {
-                                        throw_outside(ex);
-                                    }
-                                }
-                            }
-                        }
-                        , auto_bom = function (blob) {
-                            // prepend BOM for UTF-8 XML and text/* types (including HTML)
-                            // note: your browser will automatically convert UTF-16 U+FEFF to EF BB BF
-                            if (/^\s*(?:text\/\S*|application\/xml|\S*\/\S*\+xml)\s*;.*charset\s*=\s*utf-8/i.test(blob.type)) {
-                                return new Blob([String.fromCharCode(0xFEFF), blob], {type: blob.type});
-                            }
-                            return blob;
-                        }
-                        , FileSaver = function (blob, name, no_auto_bom) {
-                            if (!no_auto_bom) {
-                                blob = auto_bom(blob);
-                            }
-                            // First try a.download, then web filesystem, then object URLs
-                            var
-                                filesaver = this
-                                , type = blob.type
-                                , force = type === force_saveable_type
-                                , object_url
-                                , dispatch_all = function () {
-                                    dispatch(filesaver, "writestart progress write writeend".split(" "));
-                                }
-                                // on any filesys errors revert to saving with object URLs
-                                , fs_error = function () {
-                                    if ((is_chrome_ios || (force && is_safari)) && view.FileReader) {
-                                        // Safari doesn't allow downloading of blob urls
-                                        var reader = new FileReader();
-                                        reader.onloadend = function () {
-                                            var url = is_chrome_ios ? reader.result : reader.result.replace(/^data:[^;]*;/, 'data:attachment/file;');
-                                            var popup = view.open(url, '_blank');
-                                            if (!popup) {
-                                                view.location.href = url;
-                                            }
-                                            url = undefined; // release reference before dispatching
-                                            filesaver.readyState = filesaver.DONE;
-                                            dispatch_all();
-                                        };
-                                        reader.readAsDataURL(blob);
-                                        filesaver.readyState = filesaver.INIT;
-                                        return;
-                                    }
-                                    // don't create more object URLs than needed
-                                    if (!object_url) {
-                                        object_url = get_URL().createObjectURL(blob);
-                                    }
-                                    if (force) {
-                                        view.location.href = object_url;
-                                    }
-                                    else {
-                                        var opened = view.open(object_url, "_blank");
-                                        if (!opened) {
-                                            // Apple does not allow window.open, see https://developer.apple.com/library/safari/documentation/Tools/Conceptual/SafariExtensionGuide/WorkingwithWindowsandTabs/WorkingwithWindowsandTabs.html
-                                            view.location.href = object_url;
+                            , dispatch = function (filesaver, event_types, event) {
+                                event_types = [].concat(event_types);
+                                var i = event_types.length;
+                                while (i--) {
+                                    var listener = filesaver["on" + event_types[i]];
+                                    if (typeof listener === "function") {
+                                        try {
+                                            listener.call(filesaver, event || filesaver);
+                                        }
+                                        catch (ex) {
+                                            throw_outside(ex);
                                         }
                                     }
-                                    filesaver.readyState = filesaver.DONE;
-                                    dispatch_all();
-                                    revoke(object_url);
                                 }
-                                ;
-                            filesaver.readyState = filesaver.INIT;
-                            if (can_use_save_link) {
-                                object_url = get_URL().createObjectURL(blob);
-                                setTimeout(function () {
-                                    save_link.href = object_url;
-                                    save_link.download = name;
-                                    click(save_link);
-                                    dispatch_all();
-                                    revoke(object_url);
-                                    filesaver.readyState = filesaver.DONE;
-                                });
-                                return;
                             }
-                            fs_error();
-                        }
-                        , FS_proto = FileSaver.prototype
-                        , saveAs = function (blob, name, no_auto_bom) {
-                            return new FileSaver(blob, name || blob.name || "download", no_auto_bom);
-                        }
-                        ;
-                    // IE 10+ (native saveAs)
-                    if (typeof navigator !== "undefined" && navigator.msSaveOrOpenBlob) {
-                        return function (blob, name, no_auto_bom) {
-                            name = name || blob.name || "download";
-                            if (!no_auto_bom) {
-                                blob = auto_bom(blob);
+                            , auto_bom = function (blob) {
+                                // prepend BOM for UTF-8 XML and text/* types (including HTML)
+                                // note: your browser will automatically convert UTF-16 U+FEFF to EF BB BF
+                                if (/^\s*(?:text\/\S*|application\/xml|\S*\/\S*\+xml)\s*;.*charset\s*=\s*utf-8/i.test(blob.type)) {
+                                    return new Blob([String.fromCharCode(0xFEFF), blob], {type: blob.type});
+                                }
+                                return blob;
                             }
-                            return navigator.msSaveOrOpenBlob(blob, name);
+                            , FileSaver = function (blob, name, no_auto_bom) {
+                                if (!no_auto_bom) {
+                                    blob = auto_bom(blob);
+                                }
+                                // First try a.download, then web filesystem, then object URLs
+                                var
+                                    filesaver = this
+                                    , type = blob.type
+                                    , force = type === force_saveable_type
+                                    , object_url
+                                    , dispatch_all = function () {
+                                        dispatch(filesaver, "writestart progress write writeend".split(" "));
+                                    }
+                                    // on any filesys errors revert to saving with object URLs
+                                    , fs_error = function () {
+                                        if ((is_chrome_ios || (force && is_safari)) && view.FileReader) {
+                                            // Safari doesn't allow downloading of blob urls
+                                            var reader = new FileReader();
+                                            reader.onloadend = function () {
+                                                var url = is_chrome_ios ? reader.result : reader.result.replace(/^data:[^;]*;/, 'data:attachment/file;');
+                                                var popup = view.open(url, '_blank');
+                                                if (!popup) {
+                                                    view.location.href = url;
+                                                }
+                                                url = undefined; // release reference before dispatching
+                                                filesaver.readyState = filesaver.DONE;
+                                                dispatch_all();
+                                            };
+                                            reader.readAsDataURL(blob);
+                                            filesaver.readyState = filesaver.INIT;
+                                            return;
+                                        }
+                                        // don't create more object URLs than needed
+                                        if (!object_url) {
+                                            object_url = get_URL().createObjectURL(blob);
+                                        }
+                                        if (force) {
+                                            view.location.href = object_url;
+                                        }
+                                        else {
+                                            var opened = view.open(object_url, "_blank");
+                                            if (!opened) {
+                                                // Apple does not allow window.open, see https://developer.apple.com/library/safari/documentation/Tools/Conceptual/SafariExtensionGuide/WorkingwithWindowsandTabs/WorkingwithWindowsandTabs.html
+                                                view.location.href = object_url;
+                                            }
+                                        }
+                                        filesaver.readyState = filesaver.DONE;
+                                        dispatch_all();
+                                        revoke(object_url);
+                                    }
+                                    ;
+                                filesaver.readyState = filesaver.INIT;
+
+                                if (can_use_save_link) {
+                                    object_url = get_URL().createObjectURL(blob);
+                                    setTimeout(function () {
+                                        save_link.href = object_url;
+                                        save_link.download = name;
+                                        click(save_link);
+                                        dispatch_all();
+                                        revoke(object_url);
+                                        filesaver.readyState = filesaver.DONE;
+                                    });
+                                    return;
+                                }
+
+                                fs_error();
+                            }
+                            , FS_proto = FileSaver.prototype
+                            , saveAs = function (blob, name, no_auto_bom) {
+                                return new FileSaver(blob, name || blob.name || "download", no_auto_bom);
+                            }
+                            ;
+                        // IE 10+ (native saveAs)
+                        if (typeof navigator !== "undefined" && navigator.msSaveOrOpenBlob) {
+                            return function (blob, name, no_auto_bom) {
+                                name = name || blob.name || "download";
+
+                                if (!no_auto_bom) {
+                                    blob = auto_bom(blob);
+                                }
+                                return navigator.msSaveOrOpenBlob(blob, name);
+                            };
+                        }
+
+                        FS_proto.abort = function () {
                         };
-                    }
-                    FS_proto.abort = function () {
-                    };
-                    FS_proto.readyState = FS_proto.INIT = 0;
-                    FS_proto.WRITING = 1;
-                    FS_proto.DONE = 2;
-                    FS_proto.error =
-                        FS_proto.onwritestart =
-                            FS_proto.onprogress =
-                                FS_proto.onwrite =
-                                    FS_proto.onabort =
-                                        FS_proto.onerror =
-                                            FS_proto.onwriteend =
-                                                null;
-                    return saveAs;
-                }(
-                    typeof self !== "undefined" && self
-                    || typeof window !== "undefined" && window
-                    || this.content
-                ));
-            // `self` is undefined in Firefox for Android content script context
-            // while `this` is nsIContentFrameMessageManager
-            // with an attribute `content` that corresponds to the window
-            if (typeof module !== "undefined" && module.exports) {
-                module.exports.saveAs = saveAs;
+                        FS_proto.readyState = FS_proto.INIT = 0;
+                        FS_proto.WRITING = 1;
+                        FS_proto.DONE = 2;
+
+                        FS_proto.error =
+                            FS_proto.onwritestart =
+                                FS_proto.onprogress =
+                                    FS_proto.onwrite =
+                                        FS_proto.onabort =
+                                            FS_proto.onerror =
+                                                FS_proto.onwriteend =
+                                                    null;
+
+                        return saveAs;
+                    }(
+                        typeof self !== "undefined" && self
+                        || typeof window !== "undefined" && window
+                        || this.content
+                    ));
+                // `self` is undefined in Firefox for Android content script context
+                // while `this` is nsIContentFrameMessageManager
+                // with an attribute `content` that corresponds to the window
+
+                if (typeof module !== "undefined" && module.exports) {
+                    module.exports.saveAs = saveAs;
+                }
+                else if ((typeof define !== "undefined" && define !== null) && (define.amd !== null)) {
+                    define("FileSaver.js", function () {
+                        return saveAs;
+                    });
+                }
+
+
+               document.getElementById('button').onclick = function(){
+                    saveAs(new Blob(["Hello, world!"], {type: "text/plain;charset=utf-8"}),'hello.txt')
+               }
             }
-            else if ((typeof define !== "undefined" && define !== null) && (define.amd !== null)) {
-                define("FileSaver.js", function () {
-                    return saveAs;
-                });
-            }
+
         </script>
-        <script>
-            (function (view) {
-                "use strict";
-// The canvas drawing portion of the demo is based off the demo at
-// http://www.williammalone.com/articles/create-html5-canvas-javascript-drawing-app/
-                var
-                    document = view.document
-                    , $ = function (id) {
-                        return document.getElementById(id);
-                    }
-                    , session = view.sessionStorage
-                    // only get URL when necessary in case Blob.js hasn't defined it yet
-                    , get_blob = function () {
-                        return view.Blob;
-                    }
-                    , canvas = $("canvas")
-                    , canvas_options_form = $("canvas-options")
-                    , canvas_filename = $("canvas-filename")
-                    , canvas_clear_button = $("canvas-clear")
-                    , text = $("text")
-                    , text_options_form = $("text-options")
-                    , text_filename = $("text-filename")
-                    , html = $("html")
-                    , html_options_form = $("html-options")
-                    , html_filename = $("html-filename")
-                    , ctx = canvas.getContext("2d")
-                    , drawing = false
-                    , x_points = session.x_points || []
-                    , y_points = session.y_points || []
-                    , drag_points = session.drag_points || []
-                    , add_point = function (x, y, dragging) {
-                        x_points.push(x);
-                        y_points.push(y);
-                        drag_points.push(dragging);
-                    }
-                    , draw = function () {
-                        canvas.width = canvas.width;
-                        ctx.lineWidth = 6;
-                        ctx.lineJoin = "round";
-                        ctx.strokeStyle = "#000000";
-                        var
-                            i = 0
-                            , len = x_points.length
-                            ;
-                        for (; i < len; i++) {
-                            ctx.beginPath();
-                            if (i && drag_points[i]) {
-                                ctx.moveTo(x_points[i - 1], y_points[i - 1]);
-                            }
-                            else {
-                                ctx.moveTo(x_points[i] - 1, y_points[i]);
-                            }
-                            ctx.lineTo(x_points[i], y_points[i]);
-                            ctx.closePath();
-                            ctx.stroke();
-                        }
-                    }
-                    , stop_drawing = function () {
-                        drawing = false;
-                    }
-                    // Title guesser and document creator available at https://gist.github.com/1059648
-                    , guess_title = function (doc) {
-                        var
-                            h = "h6 h5 h4 h3 h2 h1".split(" ")
-                            , i = h.length
-                            , headers
-                            , header_text
-                            ;
-                        while (i--) {
-                            headers = doc.getElementsByTagName(h[i]);
-                            for (var j = 0, len = headers.length; j < len; j++) {
-                                header_text = headers[j].textContent.trim();
-                                if (header_text) {
-                                    return header_text;
-                                }
-                            }
-                        }
-                    }
-                    , doc_impl = document.implementation
-                    , create_html_doc = function (html) {
-                        var
-                            dt = doc_impl.createDocumentType('html', null, null)
-                            , doc = doc_impl.createDocument("http://www.w3.org/1999/xhtml", "html", dt)
-                            , doc_el = doc.documentElement
-                            , head = doc_el.appendChild(doc.createElement("head"))
-                            , charset_meta = head.appendChild(doc.createElement("meta"))
-                            , title = head.appendChild(doc.createElement("title"))
-                            , body = doc_el.appendChild(doc.createElement("body"))
-                            , i = 0
-                            , len = html.childNodes.length
-                            ;
-                        charset_meta.setAttribute("charset", html.ownerDocument.characterSet);
-                        for (; i < len; i++) {
-                            body.appendChild(doc.importNode(html.childNodes.item(i), true));
-                        }
-                        var title_text = guess_title(doc);
-                        if (title_text) {
-                            title.appendChild(doc.createTextNode(title_text));
-                        }
-                        return doc;
-                    }
-                    ;
-                canvas.width = 500;
-                canvas.height = 300;
-                if (typeof x_points === "string") {
-                    x_points = JSON.parse(x_points);
-                }
-                if (typeof y_points === "string") {
-                    y_points = JSON.parse(y_points);
-                }
-                if (typeof drag_points === "string") {
-                    drag_points = JSON.parse(drag_points);
-                }
-                if (session.canvas_filename) {
-                    canvas_filename.value = session.canvas_filename;
-                }
-                if (session.text) {
-                    text.value = session.text;
-                }
-                if (session.text_filename) {
-                    text_filename.value = session.text_filename;
-                }
-                if (session.html) {
-                    html.innerHTML = session.html;
-                }
-                if (session.html_filename) {
-                    html_filename.value = session.html_filename;
-                }
-                drawing = true;
-                draw();
-                drawing = false;
-                canvas_clear_button.addEventListener("click", function () {
-                    canvas.width = canvas.width;
-                    x_points.length =
-                        y_points.length =
-                            drag_points.length =
-                                0;
-                }, false);
-                canvas.addEventListener("mousedown", function (event) {
-                    event.preventDefault();
-                    drawing = true;
-                    add_point(event.pageX - canvas.offsetLeft, event.pageY - canvas.offsetTop, false);
-                    draw();
-                }, false);
-                canvas.addEventListener("mousemove", function (event) {
-                    if (drawing) {
-                        add_point(event.pageX - canvas.offsetLeft, event.pageY - canvas.offsetTop, true);
-                        draw();
-                    }
-                }, false);
-                canvas.addEventListener("mouseup", stop_drawing, false);
-                canvas.addEventListener("mouseout", stop_drawing, false);
-                canvas_options_form.addEventListener("submit", function (event) {
-                    event.preventDefault();
-                    canvas.toBlobHD(function (blob) {
-                        saveAs(
-                            blob
-                            , (canvas_filename.value || canvas_filename.placeholder) + ".png"
-                        );
-                    }, "image/png");
-                }, false);
-                text_options_form.addEventListener("submit", function (event) {
-                    event.preventDefault();
-                    var BB = get_blob();
-                    saveAs(
-                        new BB(
-                            [text.value || text.placeholder]
-                            , {type: "text/plain;charset=" + document.characterSet}
-                        )
-                        , (text_filename.value || text_filename.placeholder) + ".txt"
-                    );
-                }, false);
-                html_options_form.addEventListener("submit", function (event) {
-                    event.preventDefault();
-                    var
-                        BB = get_blob()
-                        , xml_serializer = new XMLSerializer()
-                        , doc = create_html_doc(html)
-                        ;
-                    saveAs(
-                        new BB(
-                            [xml_serializer.serializeToString(doc)]
-                            , {type: "text/plain;charset=" + document.characterSet}
-                        )
-                        , (html_filename.value || html_filename.placeholder) + ".xhtml"
-                    );
-                }, false);
-                view.addEventListener("unload", function () {
-                    session.x_points = JSON.stringify(x_points);
-                    session.y_points = JSON.stringify(y_points);
-                    session.drag_points = JSON.stringify(drag_points);
-                    session.canvas_filename = canvas_filename.value;
-                    session.text = text.value;
-                    session.text_filename = text_filename.value;
-                    session.html = html.innerHTML;
-                    session.html_filename = html_filename.value;
-                }, false);
-            }(self));
-        </script>
+    </head>
+    <body>
+        <button id="button">Save</button>
     </body>
 </html>
